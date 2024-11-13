@@ -1,0 +1,109 @@
+import pandas as pd
+import os
+import re
+
+# Step 1: Read in the lexical bundle spreadsheets
+def load_lexical_bundles(file_path):
+    # Load the spreadsheet into a DataFrame
+    df = pd.read_excel(file_path)
+    # Assuming lexical bundles are in the first column (adjust based on your file structure)
+    lexical_bundles = df.iloc[:, 0].tolist()
+    return lexical_bundles
+
+# Step 2: Parse annotated essays to identify rhetorical moves and lexical bundles
+def parse_essay(file_path, lexical_bundles):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    # Step 2a: Find all rhetorical moves (M1 to M6) and their text chunks
+    moves = {f'M{i}': [] for i in range(1, 7)}  # Dictionary to store text chunks for each move
+    move_pattern = r'\[M(\d+)_start\](.*?)\[M\1_end\]'
+    move_matches = re.findall(move_pattern, text, re.DOTALL)
+    
+    for move, content in move_matches:
+        moves[f'M{move}'].append(content.strip())
+
+    # Step 2b: Find occurrences of lexical bundles and map them to moves
+    bundle_data = {bundle: {'frequency': 0, 'moves': {f'M{i}': 0 for i in range(1, 7)}, 'text_chunks': []} for bundle in lexical_bundles}
+
+    for bundle in lexical_bundles:
+        # Search for each lexical bundle in the text
+        bundle_pattern = r'\b' + re.escape(bundle) + r'\b'
+        bundle_matches = re.finditer(bundle_pattern, text)
+
+        for match in bundle_matches:
+            # Increment overall frequency
+            bundle_data[bundle]['frequency'] += 1
+            bundle_text = text[max(0, match.start() - 50):min(len(text), match.end() + 50)]  # Extract surrounding text chunk
+            bundle_data[bundle]['text_chunks'].append(bundle_text)
+
+            # Map the bundle to the appropriate move (check which move it falls into)
+            for move, move_chunks in moves.items():
+                for chunk in move_chunks:
+                    if match.group() in chunk:
+                        bundle_data[bundle]['moves'][move] += 1
+                        break  # No need to check further once we've found the move
+
+    return bundle_data
+
+# Step 3: Process all essays in a folder and generate the report
+def process_essays(folder_path, lexical_bundles):
+    essay_files = [f for f in os.listdir(folder_path) if f.endswith('.txt')]
+    all_bundle_data = {bundle: {'frequency': 0, 'moves': {f'M{i}': 0 for i in range(1, 7)}, 'text_chunks': []} for bundle in lexical_bundles}
+
+    for essay_file in essay_files:
+        essay_path = os.path.join(folder_path, essay_file)
+        essay_data = parse_essay(essay_path, lexical_bundles)
+
+        # Accumulate the results for each essay
+        for bundle, data in essay_data.items():
+            all_bundle_data[bundle]['frequency'] += data['frequency']
+            for move in data['moves']:
+                all_bundle_data[bundle]['moves'][move] += data['moves'][move]
+            all_bundle_data[bundle]['text_chunks'].extend(data['text_chunks'])
+
+    return all_bundle_data
+
+# Step 4: Generate the report
+def generate_report(bundle_data):
+    report = []
+
+    for bundle, data in bundle_data.items():
+        report.append(f"Lexical Bundle: {bundle}")
+        report.append(f"Overall Frequency: {data['frequency']}")
+        for move in data['moves']:
+            report.append(f"Occurrences in {move}: {data['moves'][move]}")
+        report.append("Text Chunks: ")
+        for chunk in data['text_chunks'][:5]:  # Show first 5 chunks for brevity
+            report.append(f"  {chunk}")
+        report.append("\n" + "-"*50 + "\n")
+    
+    return "\n".join(report)
+
+# Main function to tie everything together
+def main():
+    # Load the lexical bundles
+    lexical_bundles_A = load_lexical_bundles('3-word lexical bundles_A level.xlsx')
+    lexical_bundles_B = load_lexical_bundles('3-word lexical bundles_B level.xlsx')
+
+    # Process the essays in both folders (change the folder paths as necessary)
+    folder_A = 'path_to_essays_A'
+    folder_B = 'path_to_essays_B'
+
+    bundle_data_A = process_essays(folder_A, lexical_bundles_A)
+    bundle_data_B = process_essays(folder_B, lexical_bundles_B)
+
+    # Combine data from both levels
+    all_bundle_data = {**bundle_data_A, **bundle_data_B}
+
+    # Generate and save the report
+    report = generate_report(all_bundle_data)
+    
+    # Save report to a text file
+    with open('lexical_bundles_report.txt', 'w', encoding='utf-8') as f:
+        f.write(report)
+    
+    print("Report generated successfully!")
+
+if __name__ == "__main__":
+    main()
